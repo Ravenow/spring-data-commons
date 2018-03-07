@@ -15,15 +15,11 @@
  */
 package org.springframework.data.querydsl.binding;
 
-import java.beans.PropertyDescriptor;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-
+import com.querydsl.core.BooleanBuilder;
+import com.querydsl.core.types.Path;
+import com.querydsl.core.types.Predicate;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 import org.springframework.beans.PropertyValues;
 import org.springframework.core.convert.ConversionService;
 import org.springframework.core.convert.Property;
@@ -36,36 +32,38 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.util.StringUtils;
 
-import com.querydsl.core.BooleanBuilder;
-import com.querydsl.core.types.Path;
-import com.querydsl.core.types.Predicate;
+import java.beans.PropertyDescriptor;
+import java.util.*;
+import java.util.Map.Entry;
 
 /**
  * Builder assembling {@link Predicate} out of {@link PropertyValues}.
- * 
+ *
  * @author Christoph Strobl
  * @author Oliver Gierke
  * @since 1.11
  */
 public class QuerydslPredicateBuilder {
 
+	private static final String OPERATION_DELIMITER = ":";
+
 	private final ConversionService conversionService;
-	private final MultiValueBinding<?, ?> defaultBinding;
+	private final MultiValueWithOperationBinding<?, ?> defaultOpBinding;
 	private final Map<PathInformation, Path<?>> paths;
 	private final EntityPathResolver resolver;
 
 	/**
 	 * Creates a new {@link QuerydslPredicateBuilder} for the given {@link ConversionService} and
 	 * {@link EntityPathResolver}.
-	 * 
+	 *
 	 * @param conversionService must not be {@literal null}.
-	 * @param resolver can be {@literal null}.
+	 * @param resolver          can be {@literal null}.
 	 */
 	public QuerydslPredicateBuilder(ConversionService conversionService, EntityPathResolver resolver) {
 
 		Assert.notNull(conversionService, "ConversionService must not be null!");
 
-		this.defaultBinding = new QuerydslDefaultBinding();
+		this.defaultOpBinding = new QuerydslDefaultWithOperationBinding();
 		this.conversionService = conversionService;
 		this.paths = new HashMap<PathInformation, Path<?>>();
 		this.resolver = resolver;
@@ -74,14 +72,14 @@ public class QuerydslPredicateBuilder {
 	/**
 	 * Creates a Querydsl {@link Predicate} for the given values, {@link QuerydslBindings} on the given
 	 * {@link TypeInformation}.
-	 * 
-	 * @param type the type to create a predicate for.
-	 * @param values the values to bind.
+	 *
+	 * @param type     the type to create a predicate for.
+	 * @param values   the values to bind.
 	 * @param bindings the {@link QuerydslBindings} for the predicate.
 	 * @return
 	 */
 	public Predicate getPredicate(TypeInformation<?> type, MultiValueMap<String, String> values,
-			QuerydslBindings bindings) {
+								  QuerydslBindings bindings) {
 
 		Assert.notNull(bindings, "Context must not be null!");
 
@@ -97,20 +95,20 @@ public class QuerydslPredicateBuilder {
 				continue;
 			}
 
-			String path = entry.getKey();
+			PathAndOperation pathAndOperation = getPath(entry.getKey());
 
-			if (!bindings.isPathAvailable(path, type)) {
+			if (!bindings.isPathAvailable(pathAndOperation.getPath(), type)) {
 				continue;
 			}
 
-			PathInformation propertyPath = bindings.getPropertyPath(path, type);
+			PathInformation propertyPath = bindings.getPropertyPath(pathAndOperation.getPath(), type);
 
 			if (propertyPath == null) {
 				continue;
 			}
 
 			Collection<Object> value = convertToPropertyPathSpecificType(entry.getValue(), propertyPath);
-			Predicate predicate = invokeBinding(propertyPath, bindings, value);
+			Predicate predicate = invokeBinding(propertyPath, bindings, value, pathAndOperation.getOperation());
 
 			if (predicate != null) {
 				builder.and(predicate);
@@ -122,29 +120,32 @@ public class QuerydslPredicateBuilder {
 
 	/**
 	 * Invokes the binding of the given values, for the given {@link PropertyPath} and {@link QuerydslBindings}.
-	 * 
-	 * @param dotPath must not be {@literal null}.
-	 * @param bindings must not be {@literal null}.
-	 * @param values must not be {@literal null}.
+	 *
+	 * @param dotPath   must not be {@literal null}.
+	 * @param bindings  must not be {@literal null}.
+	 * @param values    must not be {@literal null}.
+	 * @param operation must not be {@literal null}.
 	 * @return
 	 */
-	@SuppressWarnings({ "unchecked", "rawtypes" })
-	private Predicate invokeBinding(PathInformation dotPath, QuerydslBindings bindings, Collection<Object> values) {
-
+	@SuppressWarnings({"unchecked", "rawtypes"})
+	private Predicate invokeBinding(PathInformation dotPath, QuerydslBindings bindings, Collection<Object> values, OperationType operation) {
 		Path<?> path = getPath(dotPath, bindings);
-
 		MultiValueBinding binding = bindings.getBindingForPath(dotPath);
-		binding = binding == null ? defaultBinding : binding;
 
-		return binding.bind(path, values);
+		if (operation == null) {
+			return binding != null ? binding.bind(path, values) :
+					((MultiValueWithOperationBinding) defaultOpBinding).bind(path, values, OperationType.NO_OOP);
+		} else {
+			return ((MultiValueWithOperationBinding) defaultOpBinding).bind(path, values, operation);
+		}
 	}
 
 	/**
 	 * Returns the {@link Path} for the given {@link PropertyPath} and {@link QuerydslBindings}. Will try to obtain the
 	 * {@link Path} from the bindings first but fall back to reifying it from the PropertyPath in case no specific binding
 	 * has been configured.
-	 * 
-	 * @param path must not be {@literal null}.
+	 *
+	 * @param path     must not be {@literal null}.
 	 * @param bindings must not be {@literal null}.
 	 * @return
 	 */
@@ -172,9 +173,9 @@ public class QuerydslPredicateBuilder {
 	 * Converts the given source values into a collection of elements that are of the given {@link PropertyPath}'s type.
 	 * Considers a single element list with an empty {@link String} an empty collection because this basically indicates
 	 * the property having been submitted but no value provided.
-	 * 
+	 *
 	 * @param source must not be {@literal null}.
-	 * @param path must not be {@literal null}.
+	 * @param path   must not be {@literal null}.
 	 * @return
 	 */
 	private Collection<Object> convertToPropertyPathSpecificType(List<String> source, PathInformation path) {
@@ -199,7 +200,7 @@ public class QuerydslPredicateBuilder {
 	/**
 	 * Returns the target {@link TypeDescriptor} for the given {@link PathInformation} by either inspecting the field or
 	 * property (the latter preferred) to pick up annotations potentially defined for formatting purposes.
-	 * 
+	 *
 	 * @param path must not be {@literal null}.
 	 * @return
 	 */
@@ -221,11 +222,23 @@ public class QuerydslPredicateBuilder {
 	/**
 	 * Returns whether the given collection has exactly one element that doesn't contain any text. This is basically an
 	 * indicator that a request parameter has been submitted but no value for it.
-	 * 
+	 *
 	 * @param source must not be {@literal null}.
 	 * @return
 	 */
 	private static boolean isSingleElementCollectionWithoutText(List<String> source) {
 		return source.size() == 1 && !StringUtils.hasText(source.get(0));
+	}
+
+	private static PathAndOperation getPath(String requestPath) {
+		String[] parts = requestPath.split(OPERATION_DELIMITER, 2);
+		return new PathAndOperation(parts[0], parts.length == 1 ? null : OperationType.value(parts[1]));
+	}
+
+	@Data
+	@AllArgsConstructor
+	static class PathAndOperation {
+		String path;
+		OperationType operation;
 	}
 }
