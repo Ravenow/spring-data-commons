@@ -133,6 +133,12 @@ public class QuerydslDefaultWithOperationBindingUnitTests {
 	}
 
 	@Test
+	public void shouldCreatePredicateCorrectlyNotIn2() {
+		Predicate predicate = binding.bind(QUser.user.inceptionYear, Arrays.asList(1L, 2L), OperationType.NOT_IN2);
+		assertPredicate(predicate, is(QUser.user.inceptionYear.in(Arrays.asList(1L, 2L)).not()));
+	}
+
+	@Test
 	public void shouldCreatePredicateCorrectlyIsNull() {
 		Predicate predicate = binding.bind(QUser.user.inceptionYear, null, OperationType.IS_NULL);
 		assertPredicate(predicate, is(QUser.user.inceptionYear.isNull()));

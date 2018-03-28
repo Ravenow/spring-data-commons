@@ -141,6 +141,16 @@ public enum OperationType {
 			throw new IllegalArgumentException("Invalid operation usage");
 		}
 	},
+	NOT_IN2("notIn2") {
+		@Override
+		@SuppressWarnings({"unchecked", "rawtypes"})
+		protected Predicate getPredicateImpl(Path<?> path, Collection<?> value) {
+			if (path instanceof SimpleExpression) {
+				return ((SimpleExpression) path).in(value).not();
+			}
+			throw new IllegalArgumentException("Invalid operation usage");
+		}
+	},
 	IN("in") {
 		@Override
 		@SuppressWarnings({"unchecked", "rawtypes"})
