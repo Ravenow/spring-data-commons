@@ -93,7 +93,7 @@ public class QuerydslDefaultWithOperationBindingUnitTests {
 	@Test
 	public void shouldCreatePredicateCorrectlyLike() {
 		Predicate predicate = binding.bind(QUser.user.firstname, Collections.singleton("nick"), OperationType.LIKE);
-		assertPredicate(predicate, is(QUser.user.firstname.likeIgnoreCase("nick")));
+		assertPredicate(predicate, is(QUser.user.firstname.likeIgnoreCase("%nick%")));
 	}
 
 	@Test

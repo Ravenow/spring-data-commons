@@ -86,7 +86,7 @@ public enum OperationType {
 		@SuppressWarnings({"unchecked", "rawtypes"})
 		protected Predicate getPredicateImpl(Path<?> path, Collection<?> value) {
 			if (path instanceof StringExpression && value.size() == 1) {
-				return ((StringExpression) path).likeIgnoreCase(String.valueOf(value.iterator().next()));
+				return ((StringExpression) path).likeIgnoreCase("%" + String.valueOf(value.iterator().next()) + "%");
 			}
 			throw new IllegalArgumentException("Invalid operation usage");
 		}
